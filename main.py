@@ -1,8 +1,8 @@
 # 🧊 ICEBERG Query API
-# Version: 2.6 (Chart-Ready for ICEBERG GPT)
+# Version: 2.7 (Chart-Ready + Metadata for ICEBERG GPT)
 # ---------------------------------------------------
-# Unified multi-table query engine with formatted tables
-# and automatic chart generation for GPT visualization.
+# Unified multi-table query engine with formatted tables,
+# automatic chart generation, and metadata discovery.
 # ---------------------------------------------------
 
 from fastapi import FastAPI, Body
@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 # ==============================================================
 
 load_dotenv()
-app = FastAPI(title="ICEBERG Query API", version="2.6")
+app = FastAPI(title="ICEBERG Query API", version="2.7")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +39,7 @@ def home():
 # ==============================================================
 
 def run_sql(sql: str):
+    """Run a SQL query against the NeonDB connection and return a DataFrame."""
     try:
         conn = psycopg2.connect(os.getenv("DATABASE_URL"))
         df = pd.read_sql(sql, conn)
@@ -67,6 +68,7 @@ reit_tickers = ["PLD","EGP","FR","DLR","COLD","LXP","ILPT","REXR","STAG","TRNO",
 # ==============================================================
 
 def interpret_components(question: str):
+    """Extract metrics, tickers, and fiscal period info from a question."""
     q = question.lower().strip()
 
     detected = []
@@ -87,6 +89,7 @@ def interpret_components(question: str):
 # ==============================================================
 
 def orchestrate_query(question: str):
+    """Convert a natural-language query into SQL, execute, and merge results."""
     metrics, tickers, fq, fy = interpret_components(question)
     if not metrics:
         return pd.DataFrame([{"error": "No recognized metrics"}]), []
@@ -144,7 +147,6 @@ def make_chart(df: pd.DataFrame) -> str:
     if df.empty or "reit_ticker" not in df.columns:
         return ""
 
-    # Safely convert numeric columns (ignore blanks)
     df_chart = df.copy()
     for col in ["total_noi", "implied_cap_rate"]:
         if col in df_chart.columns:
@@ -193,7 +195,6 @@ def build_summary(df: pd.DataFrame) -> str:
     fq = int(df.iloc[0].get("fiscal_quarter", 0))
     df_fmt = df.copy()
 
-    # format values
     if "total_noi" in df_fmt.columns:
         df_fmt["total_noi"] = df_fmt["total_noi"].apply(
             lambda x: f"${float(x):,.0f}" if str(x).replace('.', '', 1).isdigit() else x
@@ -215,7 +216,33 @@ def build_summary(df: pd.DataFrame) -> str:
     return f"Industrial REIT metrics in Q{fq} {fy}:\n\n" + df_to_markdown(df_fmt)
 
 # ==============================================================
-#  ENDPOINT
+#  METADATA ENDPOINT
+# ==============================================================
+
+@app.get("/metadata")
+def metadata():
+    """Return available REIT tickers, metrics, and reporting periods."""
+    try:
+        tickers_df = run_sql("SELECT DISTINCT reit_ticker FROM iceberg.fact_noi_enterprise;")
+        periods_df = run_sql("""
+            SELECT DISTINCT fiscal_year, fiscal_quarter
+            FROM iceberg.fact_noi_enterprise
+            ORDER BY fiscal_year DESC, fiscal_quarter DESC;
+        """)
+        tickers = tickers_df["reit_ticker"].dropna().tolist()
+        periods = periods_df.to_dict(orient="records")
+        metrics = ["TOTAL_NOI", "IMPLIED_CAP_RATE", "ENTERPRISE_VALUE", "TOTAL_DEBT"]
+        return {
+            "tickers": tickers,
+            "metrics": metrics,
+            "periods": periods,
+            "source": "NeonDB (iceberg schema)"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+# ==============================================================
+#  QUERY ENDPOINT
 # ==============================================================
 
 @app.post("/query")
@@ -226,10 +253,12 @@ def query(payload: dict = Body(...)):
         df = df.fillna("")
     summary = build_summary(df) if "error" not in df.columns else None
     chart_b64 = make_chart(df)
+
     return {
         "summary": f"Ran query for: {question}",
         "sql": sqls,
         "summary_text": summary,
         "chart_base64": chart_b64,
+        "source": "NeonDB (iceberg schema, via FastAPI)",
         "result": df.to_dict(orient="records"),
     }
