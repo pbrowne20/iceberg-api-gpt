@@ -1,0 +1,96 @@
+openapi: 3.1.0
+info:
+  title: ICEBERG Query API
+  description: |
+    The ICEBERG Query API lets ChatGPT (ICEBERG GPT) interpret natural-language financial questions,
+    convert them into SQL queries for the ICEBERG NeonDB, and return both human-readable summaries
+    and structured financial data (including charts).
+  version: "2.6"
+
+servers:
+  - url: https://nonanachronously-unerosive-cherrie.ngrok-free.dev
+
+paths:
+  /query:
+    post:
+      operationId: post__query
+      summary: Run a natural language query against the ICEBERG database
+      description: >
+        Accepts a natural-language question about REITs (e.g., NOI, Cap Rate, Enterprise Value),
+        runs the appropriate SQL queries in ICEBERG NeonDB, and returns both a summary and data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question:
+                  type: string
+                  description: The natural language question to interpret and execute.
+                  example: "Plot industrial REITs NOI and Cap Rate in Q3 2025."
+              required:
+                - question
+      responses:
+        '200':
+          description: Successful query response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: string
+                    description: Confirmation message.
+                    example: "Ran query for: Plot industrial REITs NOI and Cap Rate in Q3 2025."
+                  sql:
+                    type: array
+                    description: One or more SQL statements executed to answer the query.
+                    items:
+                      type: string
+                      example: "SELECT * FROM iceberg.fact_noi_enterprise WHERE iceberg_metric_code = 'TOTAL_NOI';"
+                  summary_text:
+                    type: string
+                    description: A markdown-formatted human-readable summary or table.
+                    example: |
+                      Industrial REIT metrics in Q3 2025:
+
+                      | reit_ticker | total_noi | implied_cap_rate | fiscal_year | fiscal_quarter |
+                      | --- | --- | --- | --- | --- |
+                      | FR | $135,055 | 5.72 % | 2025 | 3 |
+                      | PLD | $1,653,334 | 4.46 % | 2025 | 3 |
+                  chart_base64:
+                    type: string
+                    description: Base64-encoded PNG image for visualizing key metrics (NOI, Cap Rate, etc.).
+                    example: "iVBORw0KGgoAAAANSUhEUgAAAoAAAAHgCAYAAA..."
+                  result:
+                    type: array
+                    description: Structured data returned by the query.
+                    items:
+                      type: object
+                      properties:
+                        reit_ticker:
+                          type: string
+                          example: FR
+                        fiscal_year:
+                          type: integer
+                          example: 2025
+                        fiscal_quarter:
+                          type: integer
+                          example: 3
+                        total_noi:
+                          type: string
+                          example: "$135,055"
+                        implied_cap_rate:
+                          type: string
+                          example: "5.72 %"
+                        enterprise_value:
+                          type: string
+                          example: "$10,524,928"
+                        total_debt:
+                          type: string
+                          example: "$1,479,819"
+        '400':
+          description: Invalid request (missing or malformed question)
+        '500':
+          description: Internal server error
