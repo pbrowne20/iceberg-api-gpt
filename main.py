@@ -262,3 +262,44 @@ def query(payload: dict = Body(...)):
         "source": "NeonDB (iceberg schema, via FastAPI)",
         "result": df.to_dict(orient="records"),
     }
+
+# ==============================================================
+#  DERIVED ENDPOINT
+# ==============================================================
+
+@app.post("/derived")
+def derived(payload: dict = Body(...)):
+    """Return precomputed derived metrics such as IMPLIED_CAP_RATE."""
+    try:
+        question = payload.get("question", "")
+        q = question.lower()
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cur = conn.cursor()
+
+        # Detect tickers (e.g., REXR, TRNO)
+        tickers = [t for t in reit_tickers if t.lower() in q]
+
+        sql = """
+            SELECT reit_ticker, nareit_sector, fiscal_year, fiscal_quarter,
+                   derived_metric_code, derived_metric_category,
+                   derived_value, unit, formula_source, as_reported, notes
+            FROM iceberg.derived_enterprise
+            WHERE derived_metric_code = 'IMPLIED_CAP_RATE'
+              AND fiscal_year = 2025
+              AND fiscal_quarter = 3
+        """
+        if tickers:
+            tlist = ", ".join(f"'{t}'" for t in tickers)
+            sql += f" AND reit_ticker IN ({tlist})"
+        sql += " ORDER BY reit_ticker;"
+
+        df = pd.read_sql(sql, conn)
+        conn.close()
+
+        return {
+            "summary": f"Derived metrics for {', '.join(tickers) if tickers else 'Industrial REITs'} (Q3 2025)",
+            "data": df.to_dict(orient="records")
+        }
+
+    except Exception as e:
+        return {"error": f"Server error: {e}"}
