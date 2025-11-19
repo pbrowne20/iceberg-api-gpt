@@ -216,52 +216,81 @@ def build_summary(df: pd.DataFrame) -> str:
     return f"Industrial REIT metrics in Q{fq} {fy}:\n\n" + df_to_markdown(df_fmt)
 
 # ==============================================================
-#  REIT METADATA ENDPOINT  (NEW)
+#  REIT METADATA ENDPOINT — NOW WITH FILTERING
 # ==============================================================
 
 @app.get("/reit_metadata")
-def reit_metadata():
+def reit_metadata(
+    ticker: str = None,
+    sector: str = None,
+    sub_sector: str = None,
+    hq_state: str = None,
+    limit: int = None,
+):
     """
-    Return static metadata for all active REITs from dim_reit.
-    This endpoint powers the REIT Explainer mode of ICEBERG GPT.
+    Return REIT metadata from iceberg.dim_reit.
+    Supports filtering so the GPT never needs to load the full dataset.
     """
-    try:
-        sql = """
-            SELECT
-                reit_ticker,
-                reit_name,
-                nareit_sector,
-                nareit_sub_sector,
-                reit_type,
-                hq_city,
-                hq_state,
-                country,
-                exchange,
-                cik,
-                website,
-                notes
-            FROM iceberg.dim_reit
-            WHERE active = TRUE
-            ORDER BY reit_ticker;
-        """
-        
-        df = run_sql(sql)
 
-        # If run_sql returned an error DataFrame
-        if "error" in df.columns:
-            return {
-                "error": df.iloc[0]["error"],
-                "sql": sql
-            }
+    # Base query
+    sql = """
+        SELECT
+            reit_ticker,
+            reit_name,
+            nareit_sector,
+            nareit_sub_sector,
+            reit_type,
+            hq_city,
+            hq_state,
+            country,
+            exchange,
+            cik,
+            website,
+            notes
+        FROM iceberg.dim_reit
+        WHERE active = TRUE
+    """
 
-        return {
-            "source": "NeonDB (iceberg.dim_reit)",
-            "count": len(df),
-            "reit_metadata": df.to_dict(orient="records")
-        }
+    # Apply filters
+    if ticker:
+        sql += f" AND reit_ticker = '{ticker.upper()}'"
 
-    except Exception as e:
-        return {"error": f"Server error: {str(e)}"}
+    if sector:
+        sql += f" AND nareit_sector = '{sector}'"
+
+    if sub_sector:
+        sql += f" AND nareit_sub_sector = '{sub_sector}'"
+
+    if hq_state:
+        sql += f" AND hq_state = '{hq_state.upper()}'"
+
+    # Limit if provided
+    if limit:
+        sql += f" LIMIT {limit}"
+
+    sql += ";"
+
+    # Execute
+    df = run_sql(sql)
+
+    # Handle errors
+    if "error" in df.columns:
+        return {"error": df.iloc[0]["error"], "sql": sql}
+
+    return {
+        "source": "NeonDB (iceberg.dim_reit)",
+        "count": len(df),
+        "filters": {
+            "ticker": ticker,
+            "sector": sector,
+            "sub_sector": sub_sector,
+            "hq_state": hq_state,
+            "limit": limit,
+        },
+        "reit_metadata": df.to_dict(orient="records"),
+        "sql": sql,
+    }
+
 
 # ==============================================================
 #  METADATA ENDPOINT
