@@ -216,6 +216,54 @@ def build_summary(df: pd.DataFrame) -> str:
     return f"Industrial REIT metrics in Q{fq} {fy}:\n\n" + df_to_markdown(df_fmt)
 
 # ==============================================================
+#  REIT METADATA ENDPOINT  (NEW)
+# ==============================================================
+
+@app.get("/reit_metadata")
+def reit_metadata():
+    """
+    Return static metadata for all active REITs from dim_reit.
+    This endpoint powers the REIT Explainer mode of ICEBERG GPT.
+    """
+    try:
+        sql = """
+            SELECT
+                reit_ticker,
+                reit_name,
+                nareit_sector,
+                nareit_sub_sector,
+                reit_type,
+                hq_city,
+                hq_state,
+                country,
+                exchange,
+                cik,
+                website,
+                notes
+            FROM iceberg.dim_reit
+            WHERE active = TRUE
+            ORDER BY reit_ticker;
+        """
+        
+        df = run_sql(sql)
+
+        # If run_sql returned an error DataFrame
+        if "error" in df.columns:
+            return {
+                "error": df.iloc[0]["error"],
+                "sql": sql
+            }
+
+        return {
+            "source": "NeonDB (iceberg.dim_reit)",
+            "count": len(df),
+            "reit_metadata": df.to_dict(orient="records")
+        }
+
+    except Exception as e:
+        return {"error": f"Server error: {str(e)}"}
+
+# ==============================================================
 #  METADATA ENDPOINT
 # ==============================================================
 

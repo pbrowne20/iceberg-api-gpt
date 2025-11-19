@@ -2,95 +2,295 @@ openapi: 3.1.0
 info:
   title: ICEBERG Query API
   description: |
-    The ICEBERG Query API lets ChatGPT (ICEBERG GPT) interpret natural-language financial questions,
-    convert them into SQL queries for the ICEBERG NeonDB, and return both human-readable summaries
-    and structured financial data (including charts).
-  version: "2.6"
+    The ICEBERG Query API powers ICEBERG GPT.
+
+    ICEBERG GPT converts natural-language financial questions
+    into SQL queries executed against the ICEBERG NeonDB and returns
+    structured financial data and metadata for display.
+
+    ⚙️  System Behavior
+    - ICEBERG GPT must answer **only** using data returned from this API.
+    - It must not use pretrained, public, or general knowledge.
+    - It must not browse the web or call any other APIs.
+    - If the API returns no results, ICEBERG GPT must respond exactly:
+      “That data or time period is not available in the ICEBERG dataset.”
+  version: "3.1"
+
+x-openai-instructions:
+  behavior: |
+    ICEBERG GPT is a fully grounded data agent and structured output formatter.
+    It must rely exclusively on the ICEBERG Query API for factual information.
+    No reasoning, extrapolation, or general knowledge may be used.
+
+    🧊  Response Contract
+    - ICEBERG GPT must output a markdown table (and chart if present)
+      followed by the Source line:
+        *Source: ICEBERG NeonDB (via ICEBERG Query API)*
+    - Internally, maintain a structured JSON block:
+        {metric, entity, period, scope, sql_executed, api_status}
+      for validation or logging (not displayed to the user).
+    - All displayed numeric values must exist character-for-character
+      in the API JSON response.
+    - If no results are returned, reply exactly:
+        “That data or time period is not available in the ICEBERG dataset.”
+    - For requests involving derived metrics (IMPLIED_CAP_RATE, LTV_RATIO,
+      DEBT_YIELD, NOI_PER_SHARE, etc.), ICEBERG GPT must call `/derived`
+      instead of `/query` to ensure data consistency.
+
+authentication:
+  type: none
 
 servers:
-  - url: https://nonanachronously-unerosive-cherrie.ngrok-free.dev
+  - url: https://iceberg-api-gpt.vercel.app
+
+x-openai-disable-completions: true
 
 paths:
   /query:
     post:
-      operationId: post__query
-      summary: Run a natural language query against the ICEBERG database
-      description: >
-        Accepts a natural-language question about REITs (e.g., NOI, Cap Rate, Enterprise Value),
-        runs the appropriate SQL queries in ICEBERG NeonDB, and returns both a summary and data.
+      operationId: post_query
+      x-openai-isConsequential: true
+      summary: Execute a natural-language query against the ICEBERG NeonDB
+      description: |
+        Accepts a natural-language financial question (e.g., “PLD NOI Q3 2025”)
+        and executes the appropriate SQL in the ICEBERG NeonDB.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - question
               properties:
                 question:
                   type: string
-                  description: The natural language question to interpret and execute.
-                  example: "Plot industrial REITs NOI and Cap Rate in Q3 2025."
+                  description: Natural-language financial question to interpret and execute.
+      responses:
+        "200":
+          description: Structured API response (strict schema)
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - summary
+                  - data
+                properties:
+                  summary:
+                    type: string
+                    description: Short summary string from backend (may be ignored by model)
+                  data:
+                    type: array
+                    description: Tabular dataset of requested metrics
+                    items:
+                      type: object
+                      required:
+                        - reit_ticker
+                        - iceberg_metric_code
+                        - fiscal_year
+                        - fiscal_quarter
+                        - value
+                      properties:
+                        reit_ticker:
+                          type: string
+                          description: Public REIT ticker symbol
+                        iceberg_metric_code:
+                          type: string
+                          description: Canonical metric identifier (matches dim_metric)
+                        fiscal_year:
+                          type: integer
+                        fiscal_quarter:
+                          type: integer
+                        value:
+                          type: number
+                        unit:
+                          type: string
+                          description: Measurement unit (from dim_unit)
+                        nareit_sector:
+                          type: string
+                        reporting_period:
+                          type: string
+                          description: Formatted period label (e.g., "Q3 2025")
+                  chart_base64:
+                    type: string
+                    description: Optional base64-encoded chart image
+
+  /derived:
+    post:
+      operationId: post_derived
+      x-openai-isConsequential: true
+      summary: Retrieve derived (as_reported = FALSE) metrics from the ICEBERG database
+      description: |
+        Returns ICEBERG-calculated metrics (e.g., IMPLIED_CAP_RATE, LTV_RATIO, NOI_PER_SHARE)
+        from `iceberg.derived_enterprise`, based on formulas in `iceberg.formulas`.
+        Used for as_reported = FALSE data only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
               required:
                 - question
+              properties:
+                question:
+                  type: string
+                  description: Natural-language query referring to a derived metric.
       responses:
-        '200':
-          description: Successful query response
+        "200":
+          description: Structured API response for derived metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - summary
+                  - data
+                properties:
+                  summary:
+                    type: string
+                    description: Short text summary from backend (may be ignored by model)
+                  data:
+                    type: array
+                    description: Dataset of derived metrics
+                    items:
+                      type: object
+                      required:
+                        - reit_ticker
+                        - derived_metric_code
+                        - fiscal_year
+                        - fiscal_quarter
+                        - derived_value
+                      properties:
+                        reit_ticker:
+                          type: string
+                          description: Public REIT ticker symbol
+                        nareit_sector:
+                          type: string
+                        derived_metric_code:
+                          type: string
+                          description: Formula code (matches `iceberg.formulas.formula_code`)
+                        derived_metric_category:
+                          type: string
+                        derived_value:
+                          type: number
+                        unit:
+                          type: string
+                        formula_source:
+                          type: string
+                        as_reported:
+                          type: boolean
+                          enum:
+                            - false
+                        notes:
+                          type: string
+                        reporting_period:
+                          type: string
+                          description: Label for fiscal quarter (e.g., "Q3 2025")
+                  chart_base64:
+                    type: string
+                    description: Optional base64-encoded visualization
+
+  /metadata:
+    get:
+      operationId: get_metadata
+      summary: Retrieve metadata about available metrics, sectors, and tickers
+      description: |
+        Returns metadata from the ICEBERG NeonDB used for query validation
+        and interpretation (metric codes, tickers, sectors, etc.).
+      responses:
+        "200":
+          description: Successful metadata retrieval
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  summary:
-                    type: string
-                    description: Confirmation message.
-                    example: "Ran query for: Plot industrial REITs NOI and Cap Rate in Q3 2025."
-                  sql:
+                  metrics:
                     type: array
-                    description: One or more SQL statements executed to answer the query.
                     items:
                       type: string
-                      example: "SELECT * FROM iceberg.fact_noi_enterprise WHERE iceberg_metric_code = 'TOTAL_NOI';"
-                  summary_text:
-                    type: string
-                    description: A markdown-formatted human-readable summary or table.
-                    example: |
-                      Industrial REIT metrics in Q3 2025:
-
-                      | reit_ticker | total_noi | implied_cap_rate | fiscal_year | fiscal_quarter |
-                      | --- | --- | --- | --- | --- |
-                      | FR | $135,055 | 5.72 % | 2025 | 3 |
-                      | PLD | $1,653,334 | 4.46 % | 2025 | 3 |
-                  chart_base64:
-                    type: string
-                    description: Base64-encoded PNG image for visualizing key metrics (NOI, Cap Rate, etc.).
-                    example: "iVBORw0KGgoAAAANSUhEUgAAAoAAAAHgCAYAAA..."
-                  result:
+                  sectors:
                     type: array
-                    description: Structured data returned by the query.
+                    items:
+                      type: string
+                  tickers:
+                    type: array
+                    items:
+                      type: string
+                  notes:
+                    type: string
+
+  /reit_metadata:
+    get:
+      operationId: get_reit_metadata
+      summary: Retrieve static metadata for all active REITs
+      description: |
+        Returns descriptive REIT metadata from the ICEBERG NeonDB (`iceberg.dim_reit`).
+        This includes REIT names, tickers, sectors, sub-sectors, headquarters,
+        REIT type, exchange, CIK, website, and notes.
+      responses:
+        "200":
+          description: Successful REIT metadata retrieval
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - source
+                  - count
+                  - reit_metadata
+                properties:
+                  source:
+                    type: string
+                    description: Data origin
+                  count:
+                    type: integer
+                    description: Number of REITs returned
+                  reit_metadata:
+                    type: array
+                    description: List of REIT metadata objects
                     items:
                       type: object
+                      required:
+                        - reit_ticker
+                        - reit_name
+                        - nareit_sector
+                        - reit_type
                       properties:
                         reit_ticker:
                           type: string
-                          example: FR
-                        fiscal_year:
-                          type: integer
-                          example: 2025
-                        fiscal_quarter:
-                          type: integer
-                          example: 3
-                        total_noi:
+                        reit_name:
                           type: string
-                          example: "$135,055"
-                        implied_cap_rate:
+                        nareit_sector:
                           type: string
-                          example: "5.72 %"
-                        enterprise_value:
+                        nareit_sub_sector:
                           type: string
-                          example: "$10,524,928"
-                        total_debt:
+                          nullable: true
+                        reit_type:
                           type: string
-                          example: "$1,479,819"
-        '400':
-          description: Invalid request (missing or malformed question)
-        '500':
-          description: Internal server error
+                        hq_city:
+                          type: string
+                          nullable: true
+                        hq_state:
+                          type: string
+                          nullable: true
+                        country:
+                          type: string
+                          nullable: true
+                        exchange:
+                          type: string
+                          nullable: true
+                        cik:
+                          type: string
+                          nullable: true
+                        website:
+                          type: string
+                          nullable: true
+                        notes:
+                          type: string
+                          nullable: true
+
+components:
+  schemas: {}
