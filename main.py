@@ -383,7 +383,7 @@ def derived(payload: dict = Body(...)):
 
 
 # ==============================================================
-#  MARKET OVERVIEW ENDPOINT — FIXED FOR SUBMARKET FIELD
+#  MARKET OVERVIEW ENDPOINT — FINAL SCHEMA-CORRECT VERSION
 # ==============================================================
 
 from typing import Optional
@@ -409,7 +409,7 @@ def market_overview(
     limit: int = 50
 ):
     """
-    Return market-level portfolio data for a REIT.
+    Return market-level portfolio data for a REIT using correct ICEBERG schema.
     """
 
     # ---------------------------
@@ -419,9 +419,9 @@ def market_overview(
         SELECT 
             dr.reit_ticker,
             dm.market_name,
-            brm.submarket_type,      -- FIXED FIELD HERE
-            fm.property_type,
-            fm.metric_name,
+            brm.submarket_type,
+            dpt.property_type_name,
+            fm.iceberg_metric_code,
             fm.metric_value,
             fm.unit,
             dt.period_label
@@ -433,6 +433,8 @@ def market_overview(
         JOIN iceberg.bridge_reit_market brm 
             ON brm.reit_id = fm.reit_id 
             AND brm.market_id = fm.market_id
+        JOIN iceberg.dim_property_type dpt
+            ON dpt.property_type_code = fm.property_type_code
         JOIN iceberg.dim_time dt 
             ON dt.time_id = fm.time_id
         WHERE 1=1
@@ -452,11 +454,11 @@ def market_overview(
         params.append(market)
 
     if property_type:
-        sql += " AND fm.property_type = %s"
+        sql += " AND dpt.property_type_name = %s"
         params.append(property_type)
 
-    # Limit at end
-    sql += " ORDER BY dm.market_name, fm.property_type, dt.period_label DESC LIMIT %s"
+    # Limit last
+    sql += " ORDER BY dm.market_name, dpt.property_type_name, dt.period_label DESC LIMIT %s"
     params.append(limit)
 
     # ---------------------------
