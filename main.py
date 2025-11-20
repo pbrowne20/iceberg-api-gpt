@@ -383,7 +383,7 @@ def derived(payload: dict = Body(...)):
 
 
 # ==============================================================
-#  MARKET OVERVIEW ENDPOINT — FINAL SCHEMA-AUTHORITATIVE VERSION
+#  MARKET OVERVIEW ENDPOINT — FINAL SCHEMA-COMPLETE VERSION
 # ==============================================================
 
 from typing import Optional
@@ -409,8 +409,7 @@ def market_overview(
     limit: int = 50
 ):
     """
-    Return market-level portfolio data for a REIT using only fields 
-    that actually exist in the ICEBERG fact_market schema.
+    Return market-level portfolio data for a REIT using actual ICEBERG schema.
     """
 
     # ---------------------------
@@ -425,7 +424,7 @@ def market_overview(
             fm.iceberg_metric_code,
             fm.metric_value,
             fm.unit,
-            dt.period_label
+            dt.reporting_period     -- FIXED: real column
         FROM iceberg.fact_market fm
         JOIN iceberg.dim_reit dr 
             ON dr.reit_id = fm.reit_id
@@ -457,11 +456,11 @@ def market_overview(
         params.append(property_type)
 
     # Ordering & Limit
-    sql += " ORDER BY dm.market_name, fm.property_type_code, dt.period_label DESC LIMIT %s"
+    sql += " ORDER BY dm.market_name, fm.property_type_code, dt.reporting_period DESC LIMIT %s"
     params.append(limit)
 
     # ---------------------------
-    # Execute & return
+    # Execute & Return
     # ---------------------------
     rows, error = safe_sql(sql, params)
 
