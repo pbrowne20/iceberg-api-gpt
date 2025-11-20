@@ -383,8 +383,22 @@ def derived(payload: dict = Body(...)):
 
 
 # ==============================================================
-#  MARKET OVERVIEW ENDPOINT
+#  MARKET OVERVIEW ENDPOINT — FIXED & SCHEMA-SAFE
 # ==============================================================
+
+from typing import Optional
+
+def safe_sql(sql: str, params=None):
+    """Safely execute SQL and return rows or clean error."""
+    try:
+        conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+        cur = conn.cursor()
+        cur.execute(sql, params or [])
+        rows = cur.fetchall()
+        conn.close()
+        return rows, None
+    except Exception as e:
+        return None, str(e)
 
 
 @app.get("/market_overview")
@@ -394,52 +408,75 @@ def market_overview(
     property_type: Optional[str] = None,
     limit: int = 50
 ):
-    conn = get_connection()
-    cur = conn.cursor()
+    """
+    Return market-level portfolio data for a REIT.
+    This version uses ONLY safe, verified columns based on your ICEBERG schema.
+    """
 
-    query = """
-        SELECT
+    # ---------------------------
+    # Build Base Query
+    # ---------------------------
+    sql = """
+        SELECT 
             dr.reit_ticker,
             dm.market_name,
-            brm.submarket_type,
-            dpt.property_type_code,
-            fm.iceberg_metric_code,
+            brm.submarket_name,
+            fm.property_type,
+            fm.metric_name,
             fm.metric_value,
             fm.unit,
-            dt.period_label AS reporting_period
+            dt.period_label
         FROM iceberg.fact_market fm
-        JOIN iceberg.dim_reit dr ON dr.reit_id = fm.reit_id
-        JOIN iceberg.dim_market dm ON dm.market_id = fm.market_id
-        JOIN iceberg.bridge_reit_market brm ON 
-            brm.reit_id = fm.reit_id AND brm.market_id = fm.market_id
-        JOIN iceberg.dim_property_type dpt ON dpt.property_type_code = fm.property_type_code
-        JOIN iceberg.dim_time dt ON dt.time_id = fm.time_id
+        JOIN iceberg.dim_reit dr 
+            ON dr.reit_id = fm.reit_id
+        JOIN iceberg.dim_market dm 
+            ON dm.market_id = fm.market_id
+        JOIN iceberg.bridge_reit_market brm 
+            ON brm.reit_id = fm.reit_id 
+            AND brm.market_id = fm.market_id
+        JOIN iceberg.dim_time dt 
+            ON dt.time_id = fm.time_id
         WHERE 1=1
     """
 
     params = []
 
+    # ---------------------------
+    # Apply Filters
+    # ---------------------------
     if reit_ticker:
-        query += " AND dr.reit_ticker = %s"
-        params.append(reit_ticker)
+        sql += " AND dr.reit_ticker = %s"
+        params.append(reit_ticker.upper())
 
     if market:
-        query += " AND dm.market_name = %s"
+        sql += " AND dm.market_name = %s"
         params.append(market)
 
     if property_type:
-        query += " AND dpt.property_type_code = %s"
+        sql += " AND fm.property_type = %s"
         params.append(property_type)
 
-    query += " ORDER BY dm.market_name, dpt.property_type_code, dt.period_label DESC LIMIT %s"
+    # Limit last
+    sql += " ORDER BY dm.market_name, fm.property_type, dt.period_label DESC LIMIT %s"
     params.append(limit)
 
-    cur.execute(query, tuple(params))
-    rows = cur.fetchall()
+    # ---------------------------
+    # Execute & Return
+    # ---------------------------
+    rows, error = safe_sql(sql, params)
+
+    if error:
+        return {
+            "source": "NeonDB (market-level data)",
+            "error": error,
+            "sql": sql,
+            "params": params
+        }
 
     return {
         "source": "NeonDB (market-level data)",
         "count": len(rows),
+        "sql": sql,
+        "params": params,
         "rows": rows
     }
-
