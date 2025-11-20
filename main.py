@@ -383,7 +383,7 @@ def derived(payload: dict = Body(...)):
 
 
 # ==============================================================
-#  MARKET OVERVIEW ENDPOINT — FIXED & SCHEMA-SAFE
+#  MARKET OVERVIEW ENDPOINT — FIXED FOR SUBMARKET FIELD
 # ==============================================================
 
 from typing import Optional
@@ -410,7 +410,6 @@ def market_overview(
 ):
     """
     Return market-level portfolio data for a REIT.
-    This version uses ONLY safe, verified columns based on your ICEBERG schema.
     """
 
     # ---------------------------
@@ -420,7 +419,7 @@ def market_overview(
         SELECT 
             dr.reit_ticker,
             dm.market_name,
-            brm.submarket_name,
+            brm.submarket_type,      -- FIXED FIELD HERE
             fm.property_type,
             fm.metric_name,
             fm.metric_value,
@@ -456,7 +455,7 @@ def market_overview(
         sql += " AND fm.property_type = %s"
         params.append(property_type)
 
-    # Limit last
+    # Limit at end
     sql += " ORDER BY dm.market_name, fm.property_type, dt.period_label DESC LIMIT %s"
     params.append(limit)
 
