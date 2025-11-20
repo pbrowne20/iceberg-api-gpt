@@ -383,7 +383,7 @@ def derived(payload: dict = Body(...)):
 
 
 # ==============================================================
-#  MARKET OVERVIEW ENDPOINT — FINAL SCHEMA-CORRECT VERSION
+#  MARKET OVERVIEW ENDPOINT — FINAL SCHEMA-AUTHORITATIVE VERSION
 # ==============================================================
 
 from typing import Optional
@@ -409,18 +409,19 @@ def market_overview(
     limit: int = 50
 ):
     """
-    Return market-level portfolio data for a REIT using correct ICEBERG schema.
+    Return market-level portfolio data for a REIT using only fields 
+    that actually exist in the ICEBERG fact_market schema.
     """
 
     # ---------------------------
-    # Build Base Query
+    # Base Query (Schema Verified)
     # ---------------------------
     sql = """
         SELECT 
             dr.reit_ticker,
             dm.market_name,
             brm.submarket_type,
-            dpt.property_type_name,
+            fm.property_type_code,
             fm.iceberg_metric_code,
             fm.metric_value,
             fm.unit,
@@ -433,8 +434,6 @@ def market_overview(
         JOIN iceberg.bridge_reit_market brm 
             ON brm.reit_id = fm.reit_id 
             AND brm.market_id = fm.market_id
-        JOIN iceberg.dim_property_type dpt
-            ON dpt.property_type_code = fm.property_type_code
         JOIN iceberg.dim_time dt 
             ON dt.time_id = fm.time_id
         WHERE 1=1
@@ -443,7 +442,7 @@ def market_overview(
     params = []
 
     # ---------------------------
-    # Apply Filters
+    # Filters
     # ---------------------------
     if reit_ticker:
         sql += " AND dr.reit_ticker = %s"
@@ -454,15 +453,15 @@ def market_overview(
         params.append(market)
 
     if property_type:
-        sql += " AND dpt.property_type_name = %s"
+        sql += " AND fm.property_type_code = %s"
         params.append(property_type)
 
-    # Limit last
-    sql += " ORDER BY dm.market_name, dpt.property_type_name, dt.period_label DESC LIMIT %s"
+    # Ordering & Limit
+    sql += " ORDER BY dm.market_name, fm.property_type_code, dt.period_label DESC LIMIT %s"
     params.append(limit)
 
     # ---------------------------
-    # Execute & Return
+    # Execute & return
     # ---------------------------
     rows, error = safe_sql(sql, params)
 
