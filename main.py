@@ -380,3 +380,66 @@ def derived(payload: dict = Body(...)):
 
     except Exception as e:
         return {"error": f"Server error: {e}"}
+
+
+# ==============================================================
+#  MARKET OVERVIEW ENDPOINT
+# ==============================================================
+
+
+@app.get("/market_overview")
+def market_overview(
+    reit_ticker: Optional[str] = None,
+    market: Optional[str] = None,
+    property_type: Optional[str] = None,
+    limit: int = 50
+):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    query = """
+        SELECT
+            dr.reit_ticker,
+            dm.market_name,
+            brm.submarket_type,
+            dpt.property_type_code,
+            fm.iceberg_metric_code,
+            fm.metric_value,
+            fm.unit,
+            dt.period_label AS reporting_period
+        FROM iceberg.fact_market fm
+        JOIN iceberg.dim_reit dr ON dr.reit_id = fm.reit_id
+        JOIN iceberg.dim_market dm ON dm.market_id = fm.market_id
+        JOIN iceberg.bridge_reit_market brm ON 
+            brm.reit_id = fm.reit_id AND brm.market_id = fm.market_id
+        JOIN iceberg.dim_property_type dpt ON dpt.property_type_code = fm.property_type_code
+        JOIN iceberg.dim_time dt ON dt.time_id = fm.time_id
+        WHERE 1=1
+    """
+
+    params = []
+
+    if reit_ticker:
+        query += " AND dr.reit_ticker = %s"
+        params.append(reit_ticker)
+
+    if market:
+        query += " AND dm.market_name = %s"
+        params.append(market)
+
+    if property_type:
+        query += " AND dpt.property_type_code = %s"
+        params.append(property_type)
+
+    query += " ORDER BY dm.market_name, dpt.property_type_code, dt.period_label DESC LIMIT %s"
+    params.append(limit)
+
+    cur.execute(query, tuple(params))
+    rows = cur.fetchall()
+
+    return {
+        "source": "NeonDB (market-level data)",
+        "count": len(rows),
+        "rows": rows
+    }
+
