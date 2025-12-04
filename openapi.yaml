@@ -225,11 +225,37 @@ paths:
   /reit_metadata:
     get:
       operationId: get_reit_metadata
-      summary: Retrieve static metadata for all active REITs
+      summary: Retrieve REIT metadata with optional filters
       description: |
-        Returns descriptive REIT metadata from the ICEBERG NeonDB (`iceberg.dim_reit`).
-        This includes REIT names, tickers, sectors, sub-sectors, headquarters,
-        REIT type, exchange, CIK, website, and notes.
+        Returns REIT metadata from the ICEBERG NeonDB (iceberg.dim_reit).
+        Supports filtering to limit responses to a single REIT or subset,
+        which is required for GPT memory efficiency.
+      parameters:
+        - in: query
+          name: ticker
+          schema:
+            type: string
+          description: Filter by exact REIT ticker (e.g., "PLD", "DLR").
+        - in: query
+          name: sector
+          schema:
+            type: string
+          description: Filter by NAREIT sector (e.g., "Retail", "Industrial").
+        - in: query
+          name: sub_sector
+          schema:
+            type: string
+          description: Filter by NAREIT sub-sector (Retail-only).
+        - in: query
+          name: hq_state
+          schema:
+            type: string
+          description: Filter by headquarters state (e.g., "CA", "TX").
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Limit the number of records returned.
       responses:
         "200":
           description: Successful REIT metadata retrieval
@@ -244,20 +270,34 @@ paths:
                 properties:
                   source:
                     type: string
-                    description: Data origin
                   count:
                     type: integer
-                    description: Number of REITs returned
+                  filters:
+                    type: object
+                    properties:
+                      ticker:
+                        type: string
+                        nullable: true
+                      sector:
+                        type: string
+                        nullable: true
+                      sub_sector:
+                        type: string
+                        nullable: true
+                      hq_state:
+                        type: string
+                        nullable: true
+                      limit:
+                        type: integer
+                        nullable: true
                   reit_metadata:
                     type: array
-                    description: List of REIT metadata objects
                     items:
                       type: object
                       required:
                         - reit_ticker
                         - reit_name
                         - nareit_sector
-                        - reit_type
                       properties:
                         reit_ticker:
                           type: string
@@ -291,6 +331,8 @@ paths:
                         notes:
                           type: string
                           nullable: true
+                  sql:
+                    type: string
 
 components:
   schemas: {}
