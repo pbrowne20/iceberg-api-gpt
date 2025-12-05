@@ -90,6 +90,57 @@ def reit_metadata(
 
     return {"count": len(rows), "rows": rows}
 
+# ---------------------------
+# /reit_overview ENDPOINT  (NEW)
+# ---------------------------
+
+@app.get("/reit_overview")
+def reit_overview(
+    reit_ticker: Optional[str] = None,
+    metric: Optional[str] = None,
+    limit: int = 50
+):
+
+    sql = """
+        SELECT 
+            dr.reit_ticker,
+            fr.iceberg_metric_code,
+            fr.metric_value,
+            fr.unit,
+            dt.reporting_period
+        FROM iceberg.fact_reit fr
+        JOIN iceberg.dim_reit dr ON dr.reit_id = fr.reit_id
+        JOIN iceberg.dim_time dt ON dt.time_id = fr.time_id
+        WHERE 1=1
+    """
+
+    params = []
+
+    # Filter by REIT
+    if reit_ticker:
+        sql += " AND LOWER(dr.reit_ticker) = LOWER(%s)"
+        params.append(reit_ticker)
+
+    # Filter by metric (e.g., 'noi', 'total_debt')
+    if metric:
+        sql += " AND LOWER(fr.iceberg_metric_code) = LOWER(%s)"
+        params.append(metric)
+
+    # Ordering / limit
+    sql += """
+        ORDER BY 
+            dr.reit_ticker,
+            fr.iceberg_metric_code,
+            dt.reporting_period DESC
+        LIMIT %s
+    """
+    params.append(limit)
+
+    rows = run_sql(sql, params)
+
+    return {"count": len(rows), "rows": rows}
+
+
 
 # ---------------------------
 # /market_overview ENDPOINT
